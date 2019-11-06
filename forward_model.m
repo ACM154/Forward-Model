@@ -1,78 +1,57 @@
-% Written by:
-% Nicholas H. Nelsen
-% California Institute of Technology
-% ACM 154 Inverse Problems and Data Assimilation Fall 2019
-% Project: Optimal Control of Viscous Burgers' Equation
-% Email: nnelsen@caltech.edu
+function output = forward_model(input,args)
+% Vectorized Forward Model with Burgers' Solver (FTCS Finite Difference Scheme)
 
-% Last updated: Oct. 10, 2019
+% output: returns u(x,T) of size (length(x), J), where T=t(end); DOES NOT return full solution field
+% input: control input vector of size (length(t), J), J is number of EKI particles and 
+%           J==1 means there are no particles
 
-% TODO:
-% -- Convert this file into a ``G(\theta)'' function that takes ``input'' and returns ``output''
+% args: cell array of size (5,1) containing, respectively: x,t,a,nu,IC
+% x: full spatial grid COLUMN vector
+% t: full time grid COLUMN vector
+% a: spatial location of control input
+% nu: viscosity coefficient of the Laplacian term
+% IC: initial condition COLUMN vector of size (length(x), 1)
 
-%% Initialization
-clc; clear variables; close all;
-tic
-
-% Plotting Defaults
-alw = 0.75;    % AxesLineWidth
-fsz = 12;      % Fontsize
-lw = 2;      % LineWidth
-msz = 6;       % MarkerSize
-
-%% Problem Setup
-
-% Pick constants
-xmin=0;
-xmax=1;
-tmin=0;
-tmax=0.6;
-nu=1e-2; % viscosity coefficient of the Laplacian
-h=1/500; % spatial mesh size
-a=0.6; % spatial location of control input
-fudge=0.9; % fudge factor for CFL number
-
-% Derived quantities
-k=fudge*(h^2)/(2*nu); % CFL 
-lambda=k/h;
-mu=k/h^2;
-x=xmin:h:xmax;
-t=tmin:k:tmax;
-
-% Pick control input
-input=sin(10*pi*t/tmax);
-
-% Pick initial condition
-ICtest=sqrt(2/3)*(1+cos(pi*x)); % default: sqrt(2/3)*(1+cos(pi*x))
-
-%% Run PDE solver
-
-u_soln=solve_burg(x,t,a,nu,ICtest,input);
-output=u_soln(:,end);
-
-%% Plot Solution
-
-% Full field
-figure(1)
-burg=surf(t,x,u_soln);
-set(burg,'LineStyle','none');
-xlabel('$t$','Interpreter','latex');
-ylabel('$x$','Interpreter','latex');
-zlabel('$u(x,t)$','Interpreter','latex');
-title('Viscous Burgers'' equation: $u_t+uu_x-\nu u_{xx}=v(t)\delta(x-a)$','Interpreter','latex')
-shading interp;
-colormap(jet);
-set(gca,'Xtick',xmin:0.25:xmax,'Ytick',xmin:0.25:xmax,'Ydir','reverse')
-set(gca,'FontSize',fsz,'LineWidth',alw,'TickLabelInterpreter','latex')
-set(gcf,'PaperPositionMode','auto')
-
-% Solution at the final time
-figure(2);
-box on;
-plot(x,output,'k','LineWidth',lw,'MarkerSize',msz)
-xlabel('$x$','Interpreter','latex');
-ylabel('$u(x,T)$','Interpreter','latex');
-set(gca,'FontSize',fsz,'LineWidth',alw,'TickLabelInterpreter','latex')
-set(gcf,'PaperPositionMode','auto')
-
-toc;
+    % Extract args
+    x=args{1};
+    t=args{2};
+    a=args{3};
+    nu=args{4};
+    IC=args{5};
+    
+    % Derived quantities
+    h=x(2)-x(1); % grid step size
+    k=t(2)-t(1); % time step size
+    lambda=k/h;
+    mu=k/h^2;
+    input_size=size(input);
+    J=input_size(2); % number of particles (ensemble members)
+    u_new=zeros(length(x),J); % pre-allocation
+    u_old=IC*ones(1,J); % initial condition
+    
+    % Dirichlet BC
+    %u(1,:)=0; % only if Neuamnn BC is not specified on the left boundary
+    u_old(end,:)=0; % right boundary
+    
+    % Define choice of discrete delta function
+    dis_delta=smooth_ddelta2(x,x,a)*ones(1,J); 
+    
+    % Begin time-stepping
+    space=2:(length(x)-1); % spatial interior indices
+    for time=1:length(t)-1
+        % Apply FTCS to interior of spatial domain
+        u_new(space,:)=u_old(space,:)-1/2*lambda*u_old(space,:).*(u_old(space+1,:)-u_old(space-1,:))...
+            +nu*mu*(u_old(space+1,:)-2*u_old(space,:)+u_old(space-1,:))...
+            +k*input(time,:).*dis_delta(space,:);
+ 
+        % Neumann BC
+        u_new(1,:)=u_old(1,:)+nu*mu*2*(u_old(2,:)-u_old(1,:))...
+           +k*input(time,:).*dis_delta(1,:); 
+       
+        % Update
+        u_old=u_new;
+    end
+    
+    % Solution at the final time t=T
+    output=u_new;
+end
